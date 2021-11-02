@@ -144,6 +144,12 @@ class DiscreteEventSimulator:
         self.departures = {}
         # Statistics to be collected: departure of each customer
 
+        self.draws_service_time = []
+        # Collect the draws generated for the service time. Useful for variance reduction
+
+        self.draws_arrival_time = []
+        # Collect the draws generated for the service time. Useful for variance reduction
+
         self.end_of_operations = None
         # Statistics to be collected: time when operations end
 
@@ -158,6 +164,12 @@ class DiscreteEventSimulator:
             time=self.closure_time, event_type='C', fct=self.close_event
         )
 
+    def run(self):
+        """Run the simulator by performing all the iterations
+        """
+        for i in self:
+            pass
+        
     def next_red_light(self):
         """Create a red light event. t is the current time,
         when the light becomes green.
@@ -190,6 +202,7 @@ class DiscreteEventSimulator:
         if not self.state.service_open:
             return
         nbr_of_minutes = np.random.exponential(1.0 / self.arrival_rate)
+        self.draws_arrival_time.append(nbr_of_minutes)
         time_of_arrival = self.state.time + nbr_of_minutes
         if time_of_arrival <= self.closure_time:
             self.event_manager.add_event(
@@ -201,6 +214,7 @@ class DiscreteEventSimulator:
         if not self.state.green:
             return
         time_in_service = np.random.exponential(self.service_time)
+        self.draws_service_time.append(time_in_service)
         self.event_manager.add_event(
             time=self.state.time + time_in_service,
             event_type='D',
