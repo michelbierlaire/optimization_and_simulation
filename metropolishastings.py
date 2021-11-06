@@ -7,26 +7,31 @@ Date: Thu Nov  4 15:10:11 2021
 # pylint: disable=invalid-name,
 
 import numpy as np
-from rhat_n_eff import rhat_n_eff
+import tqdm
+
+def generate_draws(iterator, indicators, currentNumberOfDraws):
+    return np.array(
+        [indicators(next(iterator)) for _ in range(currentNumberOfDraws)]
+    )
 
 
 class MetropolisHastingsIterator:
     """Implements the Markov chain for the MH algorithm"""
 
-    def __init__(self, initialState, userProcess, weight):
+    def __init__(self, initialState, userProcess, logweight):
         """Constructor
 
         :param initialState: the initial state of the Markov processe
         :type initialState: state
 
         :param userProcess: function that takes a state as input, and
-            return a new state, the forward and the backward
-            treansition probabilities.
+            returns a new state, the forward and the backward
+            transition probabilities.
         :type userProcess: state, pij, pji = fct(state)
 
-        :param weight: unnormalized target sampling probability. Function
-            that takes a state as input.
-        :type weight: float = fct(state)
+        :param logweight: log of the unnormalized target sampling
+            probability. Function that takes a state as input.
+        :type logweight: float = fct(state)
 
         """
 
@@ -34,7 +39,7 @@ class MetropolisHastingsIterator:
         self.accepted = 0
         self.rejected = 0
         self.userProcess = userProcess
-        self.weight = weight
+        self.logweight = logweight
         self.sequence = np.array([])
 
     def __iter__(self):
@@ -56,13 +61,13 @@ class MetropolisHastingsIterator:
 
     def __next__(self):
         """Generate the next state of the Markov process"""
-        candidate, qij, qji = self.userProcess(self.currentState)
-        wi = self.weight(self.currentState)
-        wj = self.weight(candidate)
-        ratio = wj * qji / (wi * qij)
-        alpha_ij = min(ratio, 1)
+        candidate, logqij, logqji = self.userProcess(self.currentState)
+        logwi = self.logweight(self.currentState)
+        logwj = self.logweight(candidate)
+        logratio = logwj + logqji - logwi - logqij
+        logalpha_ij = min(logratio, 0)
         r = np.random.uniform()
-        if r < alpha_ij:
+        if np.log(r) < logalpha_ij:
             self.currentState = candidate
             self.accepted += 1
         else:
@@ -110,6 +115,15 @@ class AutoCorrelation:
         ).sum() / (self.m * (self.n - self.t))
 
     def __next__(self):
+        """Implements one iteration
+
+        :return: current autocorrelation
+        :rtype: float
+
+        :raise StopIteration: when the list is exhausted or negative
+            autocorrelation has been detected
+
+        """
         if self.negative_autocorrelation:
             raise StopIteration
         if self.t >= self.n:
@@ -134,15 +148,13 @@ def AnalyzeDraws(draws):
     :type draws: numpy.array
 
     """
-    rico_r, rico_n = rhat_n_eff(draws)
-    print(f'RICO: {rico_r=} {rico_n=}')
 
     nbrOfSequences, nbrOfDraws = draws.shape
     m = 2 * nbrOfSequences
     n = int(nbrOfDraws / 2)
     draws = draws.reshape(m, n)
 
-    # The name of the variables below refer to the notation in
+    # The name of the variables below refer to the notations in
     # Gelman et al.
 
     # Means
@@ -164,10 +176,7 @@ def AnalyzeDraws(draws):
     ac = AutoCorrelation(draws, var_plus)
     neff = m * n / (1 + 2 * sum(ac))
 
-    print(f'MICHEL: {R_hat=} {neff=}')
-
     return R_hat, neff, phi_bar
-
 
 def MetropolisHastings(
     initialStates,
@@ -216,29 +225,28 @@ def MetropolisHastings(
     ]
 
     # Warmup
+    print('Warmup')
     for iterator in iterators:
         # We first generate draws that are not stored for the warmup
         # of the Markov processes
-        for _ in range(numberOfDraws):
+        for _ in tqdm.tqdm(range(numberOfDraws)):
             next(iterator)
 
+    currentNumberOfDraws = numberOfDraws
     for trials in range(maxNumberOfIterations):
+        print(f'Trial {trials} with {currentNumberOfDraws} draws')
         # Generate the draws
-        draws = []
-        for iterator in iterators:
-            # We create two consecutive sets of draws for each iterator
-            my_draws = np.array(
-                [indicators(next(iterator)) for _ in range(numberOfDraws)]
-            )
-            draws.append(my_draws)
+        draws = [
+            generate_draws(i, indicators, currentNumberOfDraws)
+            for i in iterators
+        ]
         draws = np.array(draws)
-        
+        print(f'Generated draws: {draws.shape}')
+
         # The dimensions of draws are: #sequences x #draws x #indicators
         # We change it to obtain: #indicators x #sequences x #draws
 
-        print(f'Before {draws.shape=}')
         draws = np.swapaxes(np.swapaxes(draws, 0, 2), 1, 2)
-        print(f'After {draws.shape=}')
 
         # Check for stationarity for each indicator
 
@@ -247,12 +255,29 @@ def MetropolisHastings(
         )
         R_hat = np.array(R_hat)
         neff = np.array(neff)
+        target_neff = 5 * m
         phi_bar = np.array(phi_bar)
 
-        if np.all(R_hat <= 1.1) and np.all(neff >= 5 * m):
-            return draws.flatten(), phi_bar, True, trials
+        print(f'Potential scale reduction: {R_hat}')
+        print(f'    should be at most 1.1')
+        print(f'Effective number of simulation draws: {neff}')
+        print(f'    should be at least {target_neff}')
+        if np.all(R_hat <= 1.1) and np.all(neff >= target_neff):
+            # We merge the draws from the various sequences before
+            # returning them
+            final_draws = np.array([t.flatten() for t in draws])
+            return final_draws, phi_bar, True, trials+1
+        min_neff = np.min(neff)
+        if min_neff >= target_neff:
+            inflate = 2
+        else:
+            inflate = (1 + int(target_neff / min_neff))
+        currentNumberOfDraws = currentNumberOfDraws * inflate
     print(
         f'Warning: the maximum number ({maxNumberOfIterations}) '
         f'of iterations has been reached before stationarity.'
     )
-    return draws.flatten(), phi_bar, False, maxNumberOfIterations
+    # We merge the draws from the various sequences before returning
+    # them.
+    final_draws = np.array([t.flatten() for t in draws])
+    return final_draws, phi_bar, False, maxNumberOfIterations
