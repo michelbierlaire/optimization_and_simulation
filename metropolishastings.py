@@ -9,9 +9,28 @@ Date: Thu Nov  4 15:10:11 2021
 import numpy as np
 import tqdm
 
-def generate_draws(iterator, indicators, currentNumberOfDraws):
+
+def generate_draws(iterator, indicators, numberOfDraws):
+    """Function that generates one sequence of draws. Implemented as a
+        separate function in order to implement it for parallel
+        processing (not implemented yet).
+
+    :param iterator: iterator on the MH draws
+    :type iterator: MetropolisHastingsIterator
+
+    :param indicators: list of outputs of the simulation of interest. Are
+        used to check for stationarity and calculate the effective
+        number of draws.
+    :type indicators: list(float = fct(state))
+
+    :param numberOfDraws: number of draws to generate
+    :type numberOfDraws: int
+
+    :return: the generated draws
+    :rtype: numpry.array
+    """
     return np.array(
-        [indicators(next(iterator)) for _ in range(currentNumberOfDraws)]
+        [indicators(next(iterator)) for _ in range(numberOfDraws)]
     )
 
 
@@ -140,13 +159,16 @@ class AutoCorrelation:
 
 def AnalyzeDraws(draws):
     """Calculates the potential scale reduction and the effective number
-    of simulatio draws. See Gelman et al. Chapter 11.
+    of simulation draws. See Gelman et al. Chapter 11.
 
     :param draws: S x R array of draws, where S is the number of
         sequences, and R the number of draws per sequence.
 
     :type draws: numpy.array
 
+    :return: potential scale reduction, effective numner of draws and
+        mean of the indicators
+    :rtype: float, int, numpy.array(float)
     """
 
     nbrOfSequences, nbrOfDraws = draws.shape
@@ -177,6 +199,7 @@ def AnalyzeDraws(draws):
     neff = m * n / (1 + 2 * sum(ac))
 
     return R_hat, neff, phi_bar
+
 
 def MetropolisHastings(
     initialStates,
@@ -259,19 +282,19 @@ def MetropolisHastings(
         phi_bar = np.array(phi_bar)
 
         print(f'Potential scale reduction: {R_hat}')
-        print(f'    should be at most 1.1')
+        print('    should be at most 1.1')
         print(f'Effective number of simulation draws: {neff}')
         print(f'    should be at least {target_neff}')
         if np.all(R_hat <= 1.1) and np.all(neff >= target_neff):
             # We merge the draws from the various sequences before
             # returning them
             final_draws = np.array([t.flatten() for t in draws])
-            return final_draws, phi_bar, True, trials+1
+            return final_draws, phi_bar, True, trials + 1
         min_neff = np.min(neff)
         if min_neff >= target_neff:
             inflate = 2
         else:
-            inflate = (1 + int(target_neff / min_neff))
+            inflate = 1 + int(target_neff / min_neff)
         currentNumberOfDraws = currentNumberOfDraws * inflate
     print(
         f'Warning: the maximum number ({maxNumberOfIterations}) '
