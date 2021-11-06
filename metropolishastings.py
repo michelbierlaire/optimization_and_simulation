@@ -10,18 +10,14 @@ import numpy as np
 import tqdm
 
 
-def generate_draws(iterator, indicators, numberOfDraws):
+def generate_draws(iterator, numberOfDraws):
+
     """Function that generates one sequence of draws. Implemented as a
         separate function in order to implement it for parallel
         processing (not implemented yet).
 
     :param iterator: iterator on the MH draws
     :type iterator: MetropolisHastingsIterator
-
-    :param indicators: list of outputs of the simulation of interest. Are
-        used to check for stationarity and calculate the effective
-        number of draws.
-    :type indicators: list(float = fct(state))
 
     :param numberOfDraws: number of draws to generate
     :type numberOfDraws: int
@@ -30,18 +26,18 @@ def generate_draws(iterator, indicators, numberOfDraws):
     :rtype: numpry.array
     """
     return np.array(
-        [indicators(next(iterator)) for _ in range(numberOfDraws)]
+        [next(iterator).indicators() for _ in tqdm.tqdm(range(numberOfDraws))]
     )
 
 
 class MetropolisHastingsIterator:
     """Implements the Markov chain for the MH algorithm"""
 
-    def __init__(self, initialState, userProcess, logweight):
+    def __init__(self, initialState):
         """Constructor
 
         :param initialState: the initial state of the Markov processe
-        :type initialState: state
+        :type initialState: State
 
         :param userProcess: function that takes a state as input, and
             returns a new state, the forward and the backward
@@ -57,8 +53,6 @@ class MetropolisHastingsIterator:
         self.currentState = initialState
         self.accepted = 0
         self.rejected = 0
-        self.userProcess = userProcess
-        self.logweight = logweight
         self.sequence = np.array([])
 
     def __iter__(self):
@@ -80,9 +74,9 @@ class MetropolisHastingsIterator:
 
     def __next__(self):
         """Generate the next state of the Markov process"""
-        candidate, logqij, logqji = self.userProcess(self.currentState)
-        logwi = self.logweight(self.currentState)
-        logwj = self.logweight(candidate)
+        candidate, logqij, logqji = self.currentState.next_state()
+        logwi = self.currentState.logweight()
+        logwj = candidate.logweight()
         logratio = logwj + logqji - logwi - logqij
         logalpha_ij = min(logratio, 0)
         r = np.random.uniform()
@@ -203,9 +197,6 @@ def AnalyzeDraws(draws):
 
 def MetropolisHastings(
     initialStates,
-    userProcess,
-    weight,
-    indicators,
     numberOfDraws=1000,
     maxNumberOfIterations=10,
 ):
@@ -213,20 +204,6 @@ def MetropolisHastings(
 
     :param initialStates: list of inintial states for the sequences
     :type initialStates: list(state)
-
-    :param userProcess: function that takes a state as input, and
-        return a new state, the forward and the backward
-        treansition probabilities.
-    :type userProcess: state, pij, pji = fct(state)
-
-    :param weight: unnormalized target sampling probability. Function
-        that takes a state as input.
-    :type weight: float = fct(state)
-
-    :param indicators: list of outputs of the simulation of interest. Are
-        used to check for stationarity and calculate the effective
-        number of draws.
-    :type indicators: list(float = fct(state))
 
     :param numberOfDraws: numberOfDraws requested by the user
     :type numberOfDraws: int
@@ -243,8 +220,7 @@ def MetropolisHastings(
     """
     m = 2 * len(initialStates)
     iterators = [
-        MetropolisHastingsIterator(init_state, userProcess, weight)
-        for init_state in initialStates
+        MetropolisHastingsIterator(init_state) for init_state in initialStates
     ]
 
     # Warmup
@@ -259,10 +235,7 @@ def MetropolisHastings(
     for trials in range(maxNumberOfIterations):
         print(f'Trial {trials} with {currentNumberOfDraws} draws')
         # Generate the draws
-        draws = [
-            generate_draws(i, indicators, currentNumberOfDraws)
-            for i in iterators
-        ]
+        draws = [generate_draws(i, currentNumberOfDraws) for i in iterators]
         draws = np.array(draws)
         print(f'Generated draws: {draws.shape}')
 
