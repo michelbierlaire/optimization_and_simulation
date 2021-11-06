@@ -238,7 +238,9 @@ def MetropolisHastings(
         draws = [generate_draws(i, currentNumberOfDraws) for i in iterators]
         draws = np.array(draws)
         print(f'Generated draws: {draws.shape}')
-
+        for i in iterators:
+            print(f'Success rate: {i.getSuccessRate()}')
+        
         # The dimensions of draws are: #sequences x #draws x #indicators
         # We change it to obtain: #indicators x #sequences x #draws
 
