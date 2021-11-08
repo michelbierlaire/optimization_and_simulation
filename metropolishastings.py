@@ -6,8 +6,8 @@ Date: Thu Nov  4 15:10:11 2021
 
 # pylint: disable=invalid-name,
 
+from joblib import Parallel, delayed, cpu_count
 import numpy as np
-import tqdm
 
 
 def generate_draws(iterator, numberOfDraws):
@@ -26,7 +26,7 @@ def generate_draws(iterator, numberOfDraws):
     :rtype: numpry.array
     """
     return np.array(
-        [next(iterator).indicators() for _ in tqdm.tqdm(range(numberOfDraws))]
+        [next(iterator).indicators() for _ in range(numberOfDraws)]
     )
 
 
@@ -223,24 +223,34 @@ def MetropolisHastings(
         MetropolisHastingsIterator(init_state) for init_state in initialStates
     ]
 
+    number_of_parallel_jobs = min(cpu_count(), len(iterators))
+
     # Warmup
-    print('Warmup')
-    for iterator in iterators:
-        # We first generate draws that are not stored for the warmup
-        # of the Markov processes
-        for _ in tqdm.tqdm(range(numberOfDraws)):
-            next(iterator)
+    print(
+        f'***** Warmup with {len(iterators)} sequences '
+        f'of {numberOfDraws} draws *****'
+    )
+    # We first generate draws that are not stored for the warmup
+    # of the Markov processes
+    _ = Parallel(n_jobs=number_of_parallel_jobs, prefer='threads')(
+        delayed(generate_draws)(i, numberOfDraws) for i in iterators
+    )
 
     currentNumberOfDraws = numberOfDraws
     for trials in range(maxNumberOfIterations):
-        print(f'Trial {trials} with {currentNumberOfDraws} draws')
+        print(
+            f'***** Trial {trials} with {len(iterators)} sequences '
+            f'of {currentNumberOfDraws} draws *****'
+        )
         # Generate the draws
-        draws = [generate_draws(i, currentNumberOfDraws) for i in iterators]
+        draws = Parallel(n_jobs=number_of_parallel_jobs, prefer='threads')(
+            delayed(generate_draws)(i, currentNumberOfDraws) for i in iterators
+        )
         draws = np.array(draws)
         print(f'Generated draws: {draws.shape}')
         for i in iterators:
             print(f'Success rate: {i.getSuccessRate()}')
-        
+
         # The dimensions of draws are: #sequences x #draws x #indicators
         # We change it to obtain: #indicators x #sequences x #draws
 
